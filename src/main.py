@@ -14,7 +14,8 @@ from src.models.autoregressive import LinearAutoregressive
 from src.models.hyper_lstm import HyperLSTM
 from src.models.lstm import VanillaLSTM
 from src.models.neural_forcaster import Forecaster
-from src.utils.preprocess import get_stock_data, get_electricity_data, get_traffic_data
+from src.utils.common import get_logger
+from src.utils.preprocess import get_stock_data, get_traffic_data
 from src.models.hyper_linear import HyperLinear
 from src.utils.visualize import *
 
@@ -31,13 +32,14 @@ class TrainInput(NamedTuple):
 
 class TrainOutput(NamedTuple):
     model: Forecaster
-    look_ahead_context: np.ndarray
+    avg_test_loss: float
     look_ahead: np.ndarray
 
 
 def train_models(models: Dict[str, TrainInput],
                  train_data_loader: DataLoader,
                  validation_data_loader: DataLoader,
+                 test_data_loader: DataLoader,
                  loss_function: _Loss,
                  num_epochs: int,
                  look_ahead_context: Tuple[torch.Tensor, torch.Tensor]):
@@ -52,67 +54,25 @@ def train_models(models: Dict[str, TrainInput],
                   lr_scheduler=scheduler,
                   num_epochs=num_epochs)
 
+        avg_test_loss = model.predict(test_data_loader=test_data_loader, loss_function=loss_function)
+        look_ahead = model(look_ahead_context[0].unsqueeze(0).to(model.device)).detach().numpy().squeeze()
+
         result[model_name] = TrainOutput(model=model,
-                                         look_ahead_context=look_ahead_context,
-                                         look_ahead=model(look_ahead_context[0].unsqueeze(0)))
+                                         avg_test_loss=avg_test_loss,
+                                         look_ahead=look_ahead)
 
     return result
 
 
-def get_unscaled_loss(batch_size, labels, predictions, scaler):
-    np_labels = torch.cat(labels.detach().unbind()).cpu().numpy().reshape(batch_size, -1)
-    np_predictions = torch.cat(predictions.detach().unbind()).cpu().numpy().reshape(batch_size, -1)
-
-    scaled_labels, scaled_predictions = scaler.inverse_transform(np_labels), scaler.inverse_transform(np_predictions)
-
-    return mean_squared_error(scaled_labels, scaled_predictions)
-
-
-def main():
-    parser = argparse.ArgumentParser(description='Run Time Series Forecasting')
-
-    parser.add_argument('--seq_length', type=int, default=168,
-                        help='The Time Series Sequence Length')
-
-    parser.add_argument('--horizon', type=int, default=24,
-                        help='How Many DataPoint In The Future To Predict')
-
-    parser.add_argument('--batch_size', type=int, default=8,
-                        help='The Training Batch Size')
-
-    parser.add_argument('--epochs', type=int, default=10,
-                        help='The Number Of Epochs To Run')
-
-    args = parser.parse_args()
-
-    ######################################### Static #########################################
-
-    seq_length: int = args.seq_length
-    batch_size: int = args.batch_size
-    num_epochs: int = 2  # args.epochs
-    horizon: int = args.horizon
-
-    output_directory = 'stocks'
-
-    ######################################### Organizing Data #########################################
-
-    prerocessed_data = get_traffic_data(scale=False, seq_length=seq_length, test_ratio=0.25, horizon=horizon)
-
-    train_dataset, validation_dataset, scaler = prerocessed_data.train_dataset, prerocessed_data.validation_dataset, prerocessed_data.scaler
-
-    n_samples, n_features = train_dataset.data.shape
-
-    train_data_loader = DataLoader(dataset=train_dataset, batch_size=batch_size, shuffle=True)
-    validation_data_loader = DataLoader(dataset=validation_dataset, batch_size=batch_size, shuffle=False)
-
-    look_ahead_context = validation_dataset[len(validation_dataset) - 1]
-
-    # initial_look_ahead_input = torch.from_numpy(look_ahead_context[:seq_length].reshape((1, seq_length, n_features)))
-
-    loss_function = nn.MSELoss(reduction='sum')
-
-    ######################################### Models #########################################
-
+def run_experiment(n_features: int,
+                   seq_length: int,
+                   horizon: int,
+                   train_data_loader: DataLoader,
+                   validation_data_loader: DataLoader,
+                   test_data_loader: DataLoader,
+                   loss_function: _Loss,
+                   num_epochs: int,
+                   look_ahead_context: Tuple[torch.Tensor, torch.Tensor]):
     # Linear
     hidden_dims_auto = [8, 16, 32, 64, 128]
     linear = LinearAutoregressive(hidden_dims=hidden_dims_auto,
@@ -161,32 +121,128 @@ def main():
               "Hyper LSTM": TrainInput(hyper_lstm, hyper_lstm_optimizer, hyper_lstm_scheduler)
               }
 
-    results = train_models(models=models,
-                           train_data_loader=train_data_loader,
-                           validation_data_loader=validation_data_loader,
-                           loss_function=loss_function,
-                           num_epochs=num_epochs,
-                           look_ahead_context=look_ahead_context
-                           )
+    experiment_result = train_models(models=models,
+                                     train_data_loader=train_data_loader,
+                                     validation_data_loader=validation_data_loader,
+                                     test_data_loader=test_data_loader,
+                                     loss_function=loss_function,
+                                     num_epochs=num_epochs,
+                                     look_ahead_context=look_ahead_context
+                                     )
 
-    ######################################### Plots #########################################
+    return experiment_result
+
+
+def get_unscaled_loss(batch_size, labels, predictions, scaler):
+    np_labels = torch.cat(labels.detach().unbind()).cpu().numpy().reshape(batch_size, -1)
+    np_predictions = torch.cat(predictions.detach().unbind()).cpu().numpy().reshape(batch_size, -1)
+
+    scaled_labels, scaled_predictions = scaler.inverse_transform(np_labels), scaler.inverse_transform(np_predictions)
+
+    return mean_squared_error(scaled_labels, scaled_predictions)
+
+
+def main():
+    parser = argparse.ArgumentParser(description='Run Time Series Forecasting')
+
+    parser.add_argument('--num_experiments', type=int, default=10,
+                        help='How many experiments to run')
+
+    parser.add_argument('--seq_length', type=int, default=168,
+                        help='The Time Series Sequence Length')
+
+    parser.add_argument('--horizon', type=int, default=24,
+                        help='How Many DataPoint In The Future To Predict')
+
+    parser.add_argument('--batch_size', type=int, default=16,
+                        help='The Training Batch Size')
+
+    parser.add_argument('--epochs', type=int, default=50,
+                        help='The Number Of Epochs To Run')
+
+    args = parser.parse_args()
+
+    ######################################### Static #########################################
+    logger = get_logger('Main')
+    num_experiments: int = args.num_experiments
+    seq_length: int = args.seq_length
+    batch_size: int = args.batch_size
+    num_epochs: int = args.epochs
+    horizon: int = args.horizon
+
+    output_directory = 'traffic'
+
+    ######################################### Organizing Data #########################################
+
+    # traffic
+    train_dataset, validation_dataset, test_dataset, scaler = get_traffic_data(scale=False,
+                                                                               seq_length=seq_length,
+                                                                               validation_ratio=0.2,
+                                                                               test_ratio=0.2,
+                                                                               horizon=horizon)
+
+    # stocks
+    # train_dataset, validation_dataset, test_dataset, scaler = get_stock_data(features=np.asarray(['MSFT']),
+    #                                                                          scale=True,
+    #                                                                          seq_length=seq_length,
+    #                                                                          validation_ratio=0.2,
+    #                                                                          test_ratio=0.2,
+    #                                                                          horizon=horizon)
+
+    n_samples, n_features = train_dataset.data.shape
+
+    train_data_loader = DataLoader(dataset=train_dataset, batch_size=batch_size, shuffle=True)
+    validation_data_loader = DataLoader(dataset=validation_dataset, batch_size=batch_size, shuffle=True)
+    test_data_loader = DataLoader(dataset=test_dataset, batch_size=batch_size, shuffle=False)
+
+    look_ahead_context = test_dataset[len(validation_dataset) - 1]
+
+    loss_function = nn.MSELoss(reduction='sum')
+
+    ######################################### Running Experiments #########################################
+
+    results: Dict[str, List[TrainOutput]] = {}
+
+    for i in range(num_experiments):
+        logger.info(f'Running Experiment [{i + 1}/{num_experiments}]')
+        experiment_result = run_experiment(n_features=n_features,
+                                           seq_length=seq_length,
+                                           horizon=horizon,
+                                           train_data_loader=train_data_loader,
+                                           validation_data_loader=validation_data_loader,
+                                           test_data_loader=test_data_loader,
+                                           loss_function=loss_function,
+                                           num_epochs=num_epochs,
+                                           look_ahead_context=look_ahead_context)
+
+        for key, value in experiment_result.items():
+            if key not in results:
+                results[key] = []
+            results[key].append(value)
+
+    best_models = {key: min(results, key=lambda result: result.avg_test_loss) for key, results in results.items()}
+
+    ######################################### Results #########################################
 
     losses_info = [
         TrainLossInfo(model_name=model_name, train_loss=model.train_loss, validation_loss=model.validation_loss)
-        for model_name, (model, look_ahead) in results.items()
+        for model_name, (model, avg_loss, look_ahead) in best_models.items()
     ]
 
     plot_losses(losses_info=losses_info, output_dir=output_directory)
 
     forecast_info = [ForecastsInfo(model_name=model_name,
                                    look_ahead_forecasts=look_ahead) for
-                     model_name, (model, look_ahead_context, look_ahead) in
-                     results.items()]
+                     model_name, (model, avg_test_loss, look_ahead) in
+                     best_models.items()]
 
-    plot_forecasts(train=look_ahead_context[0],
-                   validation=look_ahead_context[1],
+    plot_forecasts(input_seq=look_ahead_context[0],
+                   test=look_ahead_context[1],
                    forecasts=forecast_info,
                    output_dir=output_directory)
+
+    save_results(results=results,
+                 output_directory=output_directory)
 
 
 if __name__ == '__main__':

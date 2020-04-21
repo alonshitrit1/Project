@@ -3,8 +3,11 @@ import logging
 
 def get_logger(name: str, file: str = None, level: int = logging.DEBUG):
     logger = logging.getLogger(name=name)
-    logger.setLevel(level)
 
+    if logger.hasHandlers():
+        return logger
+
+    logger.setLevel(level)
     formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
     if file:

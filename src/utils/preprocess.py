@@ -1,4 +1,5 @@
 import os
+from collections import namedtuple
 from typing import Tuple
 
 import torch
@@ -38,17 +39,13 @@ class TimeSeriesDataSet(Dataset):
         return torch.from_numpy(X), torch.from_numpy(y)
 
 
-class PreProcessedData(object):
-
-    def __init__(self, train_dataset, validation_dataset, scaler):
-        self.train_dataset = train_dataset
-        self.validation_dataset = validation_dataset
-        self.scaler = scaler
+PreProcessedData = namedtuple('PreProcessedData', ['train_dataset', 'validation_dataset', 'test_dataset', 'scaler'])
 
 
 def get_pre_processed_data(features: np.array,
                            data_path: str,
                            test_ratio: float,
+                           validation_ratio: float,
                            seq_length: int,
                            scale: bool,
                            horizon: int) -> PreProcessedData:
@@ -57,64 +54,65 @@ def get_pre_processed_data(features: np.array,
     :param features: which stock indices to look at
     :param data_path: data file path.
     :param test_ratio: how much of the data should be used for testing.
+    :param validation_ratio: how much of the data should be used for validation.
     :param seq_length: seq length.
     :param scale: whether or not to scale
     :param horizon: how many data points ahead to predict
     :return: train data and test data
     """
-    df = pd.read_csv(data_path)
+    df = pd.read_csv(data_path)[features]
     data = df.to_numpy()
 
     scaler = MinMaxScaler(feature_range=(0, 1)) if scale else None
 
-    train, validation = train_test_split(data[:, features], test_size=test_ratio, shuffle=False)
+    df_length = len(df)
+    validation_size, test_size = int(df_length * validation_ratio), int(df_length * test_ratio)
+    train_size = df_length - validation_size - test_size
+
+    train, validation, test = np.vsplit(data, [train_size, train_size + validation_size])
 
     validation = np.vstack([train[-seq_length:], validation])
+    test = np.vstack([validation[-seq_length:], test])
 
     if scaler is not None:
         train = scaler.fit_transform(train)
         validation = scaler.transform(validation)
+        test = scaler.transform(test)
 
     train_dataset = TimeSeriesDataSet(data=train, seq_length=seq_length, horizon=horizon)
     validation_dataset = TimeSeriesDataSet(data=validation, seq_length=seq_length, horizon=horizon)
+    test_dataset = TimeSeriesDataSet(data=test, seq_length=seq_length, horizon=horizon)
 
     return PreProcessedData(train_dataset=train_dataset,
                             validation_dataset=validation_dataset,
+                            test_dataset=test_dataset,
                             scaler=scaler)
-
-
-def get_electricity_data(test_ratio: float = 0.2,
-                         seq_length: int = 1440,
-                         scale: bool = True,
-                         horizon: int = 24) -> PreProcessedData:
-    return get_pre_processed_data(features=np.asarray([0]),
-                                  data_path=os.path.join(DATA_PATH, 'voltage.csv'),
-                                  test_ratio=test_ratio,
-                                  seq_length=seq_length,
-                                  scale=scale,
-                                  horizon=horizon)
 
 
 def get_stock_data(features: np.array,
                    test_ratio: float = 0.2,
+                   validation_ratio: float = 0.2,
                    seq_length: int = 10,
                    scale: bool = True,
                    horizon: int = 24) -> PreProcessedData:
     return get_pre_processed_data(features=features,
                                   data_path=os.path.join(DATA_PATH, 'nyse_prices.csv'),
                                   test_ratio=test_ratio,
+                                  validation_ratio=validation_ratio,
                                   seq_length=seq_length,
                                   scale=scale,
                                   horizon=horizon)
 
 
 def get_traffic_data(test_ratio: float = 0.2,
+                     validation_ratio: float = 0.2,
                      seq_length: int = 10,
                      scale: bool = True,
                      horizon: int = 24) -> PreProcessedData:
-    return get_pre_processed_data(features=np.asarray([0]),
+    return get_pre_processed_data(features=np.asarray(['Occupancy']),
                                   data_path=os.path.join(DATA_PATH, 'traffic.csv'),
                                   test_ratio=test_ratio,
+                                  validation_ratio=validation_ratio,
                                   seq_length=seq_length,
                                   scale=scale,
                                   horizon=horizon)

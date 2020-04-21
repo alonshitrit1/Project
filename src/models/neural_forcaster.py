@@ -95,6 +95,10 @@ class Forecaster(Module, ABC):
         self.validation_loss = np.empty(num_epochs)
         # self.validation_forecast = np.empty(len(validation_data_loader.dataset))
 
+        states_dict = None
+
+        avg_validate_loss = float("inf")
+
         for epoch in range(num_epochs):
             # training
             self.train()
@@ -129,10 +133,14 @@ class Forecaster(Module, ABC):
                     #         self.validation_forecast[i*len(seq) + j] = y_pred[j].item()
 
             avg_train_loss = epoch_train_loss / len(train_data_loader.dataset)
-            avg_validate_loss = epoch_validate_loss / len(validation_data_loader.dataset)
+
+            new_avg_validate_loss = epoch_validate_loss / len(validation_data_loader.dataset)
+            if new_avg_validate_loss < avg_validate_loss:
+                avg_validate_loss = new_avg_validate_loss
+                states_dict = self.state_dict()
 
             self.train_loss[epoch] = avg_train_loss
-            self.validation_loss[epoch] = avg_validate_loss
+            self.validation_loss[epoch] = new_avg_validate_loss
 
             self.logger.info(f'Epoch {epoch + 1}/{num_epochs}')
             self.logger.info(f'Avg train loss: {avg_train_loss :10.8f}')
@@ -141,7 +149,31 @@ class Forecaster(Module, ABC):
             lr_scheduler.step(epoch=epoch)
 
         self.trained = True
-        return self.cpu()
+        self.load_state_dict(states_dict)
+        return self
+
+    def predict(self,
+                test_data_loader: DataLoader,
+                loss_function: _Loss
+                ) -> float:
+
+        self.to(device=self.device)
+        loss_function = loss_function.to(device=self.device)
+        self.eval()
+
+        test_loss = 0
+        with torch.no_grad():
+            for seq, labels in test_data_loader:
+                seq, labels = seq.to(self.device), labels.to(self.device)
+                y_pred = self(seq)
+
+                single_loss = loss_function(y_pred.squeeze(), labels.squeeze())
+                test_loss += single_loss.item()
+
+        avg_test_loss = test_loss / len(test_data_loader.dataset)
+        self.device = torch.device('cpu')
+        self.cpu()
+        return avg_test_loss
 
     def predict_ahead(self, initial_input: torch.Tensor, horizon: int) -> np.array:
         self.to(self.device)
