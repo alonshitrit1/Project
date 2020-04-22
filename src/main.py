@@ -1,4 +1,4 @@
-from typing import Dict, Tuple
+from typing import Tuple
 
 import argparse
 import torch
@@ -15,7 +15,7 @@ from src.models.hyper_lstm import HyperLSTM
 from src.models.lstm import VanillaLSTM
 from src.models.neural_forcaster import Forecaster
 from src.utils.common import get_logger
-from src.utils.preprocess import get_stock_data, get_traffic_data
+from src.utils.preprocess import load_dataset
 from src.models.hyper_linear import HyperLinear
 from src.utils.visualize import *
 
@@ -73,6 +73,8 @@ def run_experiment(n_features: int,
                    loss_function: _Loss,
                    num_epochs: int,
                    look_ahead_context: Tuple[torch.Tensor, torch.Tensor]):
+
+    learning_rate = 1e-4
     # Linear
     hidden_dims_auto = [8, 16, 32, 64, 128]
     linear = LinearAutoregressive(hidden_dims=hidden_dims_auto,
@@ -80,7 +82,7 @@ def run_experiment(n_features: int,
 
     linear.device = linear_device
 
-    linear_optimizer = torch.optim.Adam(linear.parameters(), lr=1e-2)
+    linear_optimizer = torch.optim.Adam(linear.parameters(), lr=learning_rate)
     linear_scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer=linear_optimizer, gamma=0.99)
 
     # Hyper Linear
@@ -91,7 +93,7 @@ def run_experiment(n_features: int,
 
     hyper_linear.device = linear_device
 
-    hyper_linear_optimizer = torch.optim.Adam(hyper_linear.parameters(), lr=1e-4)
+    hyper_linear_optimizer = torch.optim.Adam(hyper_linear.parameters(), lr=learning_rate)
     hyper_linear_scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer=hyper_linear_optimizer, gamma=0.99)
 
     # LSTM
@@ -100,7 +102,7 @@ def run_experiment(n_features: int,
                        horizon=horizon).double()
 
     lstm.device = lstm_device
-    lstm_optimizer = torch.optim.Adam(lstm.parameters(), lr=1e-3)
+    lstm_optimizer = torch.optim.Adam(lstm.parameters(), lr=learning_rate)
     lstm_scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer=lstm_optimizer, gamma=0.99)
 
     # Hyper LSTM
@@ -110,7 +112,7 @@ def run_experiment(n_features: int,
 
     hyper_lstm.device = lstm_device
 
-    hyper_lstm_optimizer = torch.optim.Adam(hyper_lstm.parameters(), lr=1e-4)
+    hyper_lstm_optimizer = torch.optim.Adam(hyper_lstm.parameters(), lr=learning_rate)
     hyper_lstm_scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer=hyper_lstm_optimizer, gamma=0.99)
 
     ######################################### Train #########################################
@@ -141,7 +143,6 @@ def get_unscaled_loss(batch_size, labels, predictions, scaler):
 
     return mean_squared_error(scaled_labels, scaled_predictions)
 
-
 def main():
     parser = argparse.ArgumentParser(description='Run Time Series Forecasting')
 
@@ -160,7 +161,11 @@ def main():
     parser.add_argument('--epochs', type=int, default=50,
                         help='The Number Of Epochs To Run')
 
+    parser.add_argument('--dataset', type=str, choices=['stocks', 'traffic'], default='stocks',
+                        help='Which Dataset To Load')
+
     args = parser.parse_args()
+
 
     ######################################### Static #########################################
     logger = get_logger('Main')
@@ -169,25 +174,14 @@ def main():
     batch_size: int = args.batch_size
     num_epochs: int = args.epochs
     horizon: int = args.horizon
-
-    output_directory = 'traffic'
+    dataset: str = args.dataset
 
     ######################################### Organizing Data #########################################
 
-    # traffic
-    train_dataset, validation_dataset, test_dataset, scaler = get_traffic_data(scale=False,
-                                                                               seq_length=seq_length,
-                                                                               validation_ratio=0.2,
-                                                                               test_ratio=0.2,
-                                                                               horizon=horizon)
-
-    # stocks
-    # train_dataset, validation_dataset, test_dataset, scaler = get_stock_data(features=np.asarray(['MSFT']),
-    #                                                                          scale=True,
-    #                                                                          seq_length=seq_length,
-    #                                                                          validation_ratio=0.2,
-    #                                                                          test_ratio=0.2,
-    #                                                                          horizon=horizon)
+    # loading data
+    train_dataset, validation_dataset, test_dataset, scaler = load_dataset(dataset=dataset,
+                                                                           seq_length=seq_length,
+                                                                           horizon=horizon)
 
     n_samples, n_features = train_dataset.data.shape
 
@@ -229,7 +223,7 @@ def main():
         for model_name, (model, avg_loss, look_ahead) in best_models.items()
     ]
 
-    plot_losses(losses_info=losses_info, output_dir=output_directory)
+    plot_losses(losses_info=losses_info, output_dir=dataset)
 
     forecast_info = [ForecastsInfo(model_name=model_name,
                                    look_ahead_forecasts=look_ahead) for
@@ -239,10 +233,10 @@ def main():
     plot_forecasts(input_seq=look_ahead_context[0],
                    test=look_ahead_context[1],
                    forecasts=forecast_info,
-                   output_dir=output_directory)
+                   output_dir=dataset)
 
     save_results(results=results,
-                 output_directory=output_directory)
+                 output_directory=dataset)
 
 
 if __name__ == '__main__':

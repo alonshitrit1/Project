@@ -116,3 +116,28 @@ def get_traffic_data(test_ratio: float = 0.2,
                                   seq_length=seq_length,
                                   scale=scale,
                                   horizon=horizon)
+
+
+def load_dataset(dataset: str,
+                 test_ratio: float = 0.2,
+                 validation_ratio: float = 0.2,
+                 seq_length: int = 10,
+                 horizon: int = 24,
+                 **kwargs):
+
+    if dataset == 'traffic':
+        return get_traffic_data(test_ratio=test_ratio,
+                                validation_ratio=validation_ratio,
+                                seq_length=seq_length,
+                                horizon=horizon,
+                                **kwargs)
+    elif dataset == 'stocks':
+        return get_stock_data(features=np.asarray(['MSFT']),
+                              seq_length=seq_length,
+                              validation_ratio=validation_ratio,
+                              test_ratio=test_ratio,
+                              horizon=horizon,
+                              **kwargs
+                              )
+    else:
+        raise Exception(f'Dataset should be either traffic or stocks, received {dataset} instead')
