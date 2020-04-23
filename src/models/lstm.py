@@ -1,7 +1,7 @@
 import torch
 from torch import nn
 
-from src.models.neural_forcaster import Forecaster
+from models.neural_forcaster import Forecaster
 
 
 class VanillaLSTM(Forecaster):

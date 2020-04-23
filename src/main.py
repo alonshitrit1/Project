@@ -10,14 +10,14 @@ from torch.optim.optimizer import Optimizer
 from torch.nn.modules.loss import _Loss
 from torch.optim.lr_scheduler import _LRScheduler
 
-from src.models.autoregressive import LinearAutoregressive
-from src.models.hyper_lstm import HyperLSTM
-from src.models.lstm import VanillaLSTM
-from src.models.neural_forcaster import Forecaster
-from src.utils.common import get_logger
-from src.utils.preprocess import load_dataset
-from src.models.hyper_linear import HyperLinear
-from src.utils.visualize import *
+from models.autoregressive import LinearAutoregressive
+from models.hyper_lstm import HyperLSTM
+from models.lstm import VanillaLSTM
+from models.neural_forcaster import Forecaster
+from utils.common import get_logger
+from utils.preprocess import load_dataset
+from models.hyper_linear import HyperLinear
+from utils.visualize import *
 
 use_cuda = torch.cuda.is_available()
 lstm_device = torch.device("cuda:0" if use_cuda else "cpu")
@@ -75,9 +75,10 @@ def run_experiment(n_features: int,
                    look_ahead_context: Tuple[torch.Tensor, torch.Tensor]):
 
     learning_rate = 1e-4
+    hidden_dims = [8, 16, 32, 64, 128]
+
     # Linear
-    hidden_dims_auto = [8, 16, 32, 64, 128]
-    linear = LinearAutoregressive(hidden_dims=hidden_dims_auto,
+    linear = LinearAutoregressive(hidden_dims=hidden_dims,
                                   seq_length=seq_length, horizon=horizon).double()
 
     linear.device = linear_device
@@ -86,8 +87,6 @@ def run_experiment(n_features: int,
     linear_scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer=linear_optimizer, gamma=0.99)
 
     # Hyper Linear
-    hidden_dims = [8, 16, 32, 64, 128]
-
     hyper_linear = HyperLinear(hidden_dims=hidden_dims,
                                seq_length=seq_length, horizon=horizon).double()
 
@@ -117,7 +116,8 @@ def run_experiment(n_features: int,
 
     ######################################### Train #########################################
 
-    models = {"Linear": TrainInput(linear, linear_optimizer, linear_scheduler),
+    models = {
+              "Linear": TrainInput(linear, linear_optimizer, linear_scheduler),
               "Hyper Linear": TrainInput(hyper_linear, hyper_linear_optimizer, hyper_linear_scheduler),
               "LSTM": TrainInput(lstm, lstm_optimizer, lstm_scheduler),
               "Hyper LSTM": TrainInput(hyper_lstm, hyper_lstm_optimizer, hyper_lstm_scheduler)
@@ -143,6 +143,7 @@ def get_unscaled_loss(batch_size, labels, predictions, scaler):
 
     return mean_squared_error(scaled_labels, scaled_predictions)
 
+
 def main():
     parser = argparse.ArgumentParser(description='Run Time Series Forecasting')
 
@@ -153,7 +154,7 @@ def main():
                         help='The Time Series Sequence Length')
 
     parser.add_argument('--horizon', type=int, default=24,
-                        help='How Many DataPoint In The Future To Predict')
+                        help='How Many Data Points In The Future To Predict')
 
     parser.add_argument('--batch_size', type=int, default=16,
                         help='The Training Batch Size')
@@ -161,8 +162,8 @@ def main():
     parser.add_argument('--epochs', type=int, default=50,
                         help='The Number Of Epochs To Run')
 
-    parser.add_argument('--dataset', type=str, choices=['stocks', 'traffic'], default='stocks',
-                        help='Which Dataset To Load')
+    parser.add_argument('--dataset', type=str, choices=['stocks', 'traffic'], default='traffic',
+                        help='Which Dataset To Load (Default=traffic)')
 
     args = parser.parse_args()
 

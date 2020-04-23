@@ -106,8 +106,8 @@ def get_stock_data(features: np.array,
 
 def get_traffic_data(test_ratio: float = 0.2,
                      validation_ratio: float = 0.2,
-                     seq_length: int = 10,
-                     scale: bool = True,
+                     seq_length: int = 168,
+                     scale: bool = False,
                      horizon: int = 24) -> PreProcessedData:
     return get_pre_processed_data(features=np.asarray(['Occupancy']),
                                   data_path=os.path.join(DATA_PATH, 'traffic.csv'),
@@ -121,7 +121,7 @@ def get_traffic_data(test_ratio: float = 0.2,
 def load_dataset(dataset: str,
                  test_ratio: float = 0.2,
                  validation_ratio: float = 0.2,
-                 seq_length: int = 10,
+                 seq_length: int = 168,
                  horizon: int = 24,
                  **kwargs):
 

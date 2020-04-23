@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 from matplotlib import cycler
 
-from src.main import TrainOutput
+from main import TrainOutput
 
 color_cycler = cycler(color=[list(rgb) for rgb in plt.get_cmap('Set1').colors])
 plt.rc('axes', prop_cycle=color_cycler)

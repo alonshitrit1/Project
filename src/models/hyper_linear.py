@@ -3,7 +3,7 @@ from typing import List
 
 from torch import nn, Tensor
 
-from src.models.neural_forcaster import Forecaster
+from models.neural_forcaster import Forecaster
 
 
 class HyperLinear(Forecaster):

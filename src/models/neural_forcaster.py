@@ -11,7 +11,7 @@ from torch.optim.lr_scheduler import _LRScheduler
 from torch.optim.optimizer import Optimizer
 from torch.utils.data.dataloader import DataLoader
 
-from src.utils.common import get_logger
+from utils.common import get_logger
 
 
 class Forecaster(Module, ABC):

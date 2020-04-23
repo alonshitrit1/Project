@@ -4,7 +4,7 @@ from typing import List
 from torch import Tensor
 from torch.nn import  Linear, Sequential, ReLU
 
-from src.models.neural_forcaster import Forecaster
+from models.neural_forcaster import Forecaster
 
 
 class LinearAutoregressive(Forecaster):
